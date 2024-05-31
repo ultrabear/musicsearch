@@ -3,4 +3,20 @@ name = "musicsearch"
 version = "0.1.0"
 edition = "2021"
 
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+overflow-checks = true
+lto = "thin"
+
 [dependencies]
+camino = "1.1.7"
+clap = { version = "4.5.4", features = ["derive"] }
+ffmpeg-next = { version = "7.0.2", features = ["postprocessing"] }
+gethostname = "0.4.3"
+phf = { version = "0.11.2", features = ["macros"] }
+rayon = "1.10.0"
+rustyline = "14.0.0"
+tantivy = "0.22.0"
+walkdir = "2.5.0"
