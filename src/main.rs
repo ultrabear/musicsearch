@@ -381,16 +381,25 @@ fn main() {
         .build(),
     );
     let mut writer = index
-        .writer(50_000_000)
-        .expect("this writer will not error with 50mb of storage allocated");
+        .writer(20_000_000)
+        .expect("this writer will not error with 20mb of storage allocated");
+
+    let mut songs = 0;
 
     for dir in &args.dir {
-        recursive_find_audiofiles(dir)
+        songs += recursive_find_audiofiles(dir)
             .map(|v| v.map(|f| writer.add_document(f.tantivy_store(&map))))
-            .for_each(|_| ());
+            .filter(|v| v.as_ref().is_ok_and(|v| v.is_ok())).count();
     }
 
     writer.commit().unwrap();
+
+    println!("{songs} songs in index");
+
+    // SAFETY: This is a regular libc function with no invariants
+    // call this once we have finished our big allocations to hint we are done making large
+    // allocations
+    unsafe { libc::malloc_trim(0) };
 
     drop(writer);
 

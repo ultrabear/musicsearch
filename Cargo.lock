@@ -685,6 +685,7 @@ dependencies = [
  "clap",
  "ffmpeg-next",
  "gethostname",
+ "libc",
  "phf",
  "rayon",
  "rustyline",
