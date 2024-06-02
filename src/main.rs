@@ -396,11 +396,6 @@ fn main() {
 
     println!("{songs} songs in index");
 
-    // SAFETY: This is a regular libc function with no invariants
-    // call this once we have finished our big allocations to hint we are done making large
-    // allocations
-    unsafe { libc::malloc_trim(0) };
-
     drop(writer);
 
     let mut editor = DefaultEditor::new().unwrap();
