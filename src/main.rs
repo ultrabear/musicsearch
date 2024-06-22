@@ -40,6 +40,17 @@ const AUDIO_EXT: phf::Set<&'static str> = phf::phf_set! {
     "wav",
 };
 
+struct AlbumKey {
+    ordered_paths: Vec<Utf8PathBuf>,
+
+    album_name: String,
+
+    /// unlike AudioFile which prefers artist over album_artist, we prefer album_artist here
+    artist_name: String,
+
+    year: Option<u32>,
+}
+
 #[derive(Default, Debug)]
 struct AudioFile {
     /// displayed (but only index the filename)
@@ -53,6 +64,9 @@ struct AudioFile {
     /// if a part of an album this is the track number within that album
     track: Option<u64>,
     date: Option<String>,
+
+    /// may be parsed off of date if it exists, or via the explicit year key
+    year: Option<u32>,
 
     /// keys are first lowercased
     extras: HashMap<String, String>,
@@ -201,27 +215,29 @@ impl Display for AudioFile {
         // file name must exist to be a valid AudioFile
         let fname = self.file_path.file_name().unwrap();
 
-        write!(f, "{fname}")?;
+        write!(f, "\x1b[37m{fname}\x1b[0m")?;
 
         if let Some(title) = &self.title {
-            write!(f, ": {title}")?;
+            write!(f, "\x1b[92m: {title}")?;
         }
 
         if let Some(artist) = self.artist.as_ref().or(self.album_artist.as_ref()) {
-            write!(f, " - {artist}")?;
+            write!(f, "\x1b[92m - {artist}")?;
         }
 
         if let Some(album) = &self.album {
-            write!(f, " - {album}")?;
-        }
-
-        if let Some(date) = &self.date {
-            write!(f, " ({date})")?;
+            write!(f, "\x1b[94m - {album}")?;
         }
 
         if let Some(track) = self.track {
-            write!(f, " #{track}")?;
+            write!(f, "\x1b[94m #{track}")?;
         }
+
+        if let Some(date) = &self.date {
+            write!(f, "\x1b[32m ({date})")?;
+        }
+
+        write!(f, "\x1b[0m")?;
 
         Ok(())
     }
@@ -364,6 +380,10 @@ impl<H: Display, T: Display> Display for Hyperlink<H, T> {
 fn main() {
     let args = Args::parse();
 
+    if args.dir.is_empty() {
+        println!("warning: no directories passed");
+    }
+
     let (scm, map) = HardSchema::schema();
 
     let index = tantivy::Index::create_in_ram(scm.clone());
@@ -389,7 +409,8 @@ fn main() {
     for dir in &args.dir {
         songs += recursive_find_audiofiles(dir)
             .map(|v| v.map(|f| writer.add_document(f.tantivy_store(&map))))
-            .filter(|v| v.as_ref().is_ok_and(|v| v.is_ok())).count();
+            .filter(|v| v.as_ref().is_ok_and(|v| v.is_ok()))
+            .count();
     }
 
     writer.commit().unwrap();
@@ -418,7 +439,7 @@ fn main() {
         let start = Instant::now();
 
         let search = reader.searcher();
-        let top_resp = search.search(&q, &TopDocs::with_limit(10)).unwrap();
+        let top_resp = search.search(&q, &TopDocs::with_limit(15)).unwrap();
 
         for (_, address) in top_resp.into_iter().rev() {
             let retr = AudioFile::tantivy_recall(&map, &search.doc(address).unwrap());
