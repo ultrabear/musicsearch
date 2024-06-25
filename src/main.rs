@@ -152,6 +152,8 @@ impl AudioFile {
                 .join(" "),
         );
 
+        doc.add_text(scm.item_type, "song");
+
         doc
     }
 
@@ -183,9 +185,10 @@ impl AudioFile {
             track,
             date,
             extras,
+            item_type,
         } = scm;
 
-        _ = extras;
+        _ = (extras, item_type);
 
         match f {
             _ if f == path => self.file_path = must_string(&fv.value).into(),
@@ -215,18 +218,18 @@ impl Display for AudioFile {
         // file name must exist to be a valid AudioFile
         let fname = self.file_path.file_name().unwrap();
 
-        write!(f, "\x1b[37m{fname}\x1b[0m")?;
+        write!(f, "\x1b[37m{fname}")?;
 
         if let Some(title) = &self.title {
-            write!(f, "\x1b[92m: {title}")?;
+            write!(f, ": \x1b[92m{title}")?;
         }
 
         if let Some(artist) = self.artist.as_ref().or(self.album_artist.as_ref()) {
-            write!(f, "\x1b[92m - {artist}")?;
+            write!(f, " - \x1b[92m{artist}")?;
         }
 
         if let Some(album) = &self.album {
-            write!(f, "\x1b[94m - {album}")?;
+            write!(f, " \x1b[37m- \x1b[94m{album}")?;
         }
 
         if let Some(track) = self.track {
@@ -251,6 +254,7 @@ struct HardSchema {
     track: Field,
     date: Field,
     extras: Field,
+    item_type: Field,
 }
 
 impl HardSchema {
@@ -261,6 +265,7 @@ impl HardSchema {
     const TRACK: &'static str = "track";
     const DATE: &'static str = "date";
     const EXTRAS: &'static str = "extras";
+    const ITEM_TYPE: &'static str = "type";
 
     fn schema() -> (Schema, Self) {
         let mut schema = Schema::builder();
@@ -279,6 +284,7 @@ impl HardSchema {
         schema.add_u64_field(HardSchema::TRACK, INDEXED | STORED);
         schema.add_text_field(HardSchema::DATE, text_stored.clone());
         schema.add_text_field(HardSchema::EXTRAS, text);
+        schema.add_text_field(HardSchema::ITEM_TYPE, text_stored.clone());
 
         let scm = schema.build();
 
@@ -296,6 +302,7 @@ impl HardSchema {
             self.track,
             self.date,
             self.extras,
+            self.item_type,
         ]
     }
 
@@ -309,6 +316,7 @@ impl HardSchema {
             track: schema.get_field(HardSchema::TRACK).unwrap(),
             date: schema.get_field(HardSchema::DATE).unwrap(),
             extras: schema.get_field(HardSchema::EXTRAS).unwrap(),
+            item_type: schema.get_field(HardSchema::ITEM_TYPE).unwrap(),
         }
     }
 }
