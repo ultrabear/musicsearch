@@ -3,6 +3,11 @@ use std::{collections::HashMap, fmt::Display, io, process, time::Instant};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
+use cursive::{
+    utils::markup,
+    view::{Nameable, Resizable},
+    views::{LayerPosition, LinearLayout, ListView, Panel, TextArea, TextView},
+};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use rustyline::{config::Configurer, DefaultEditor};
 use tantivy::{
@@ -13,7 +18,7 @@ use tantivy::{
         INDEXED, STORED, TEXT,
     },
     tokenizer::TextAnalyzer,
-    Document, IndexWriter, Opstamp, TantivyDocument,
+    Document, IndexReader, IndexWriter, Opstamp, TantivyDocument,
 };
 use walkdir::WalkDir;
 
@@ -267,6 +272,18 @@ impl HardSchema {
     const EXTRAS: &'static str = "extras";
     const ITEM_TYPE: &'static str = "type";
 
+    fn register_tokenizer(idx: &tantivy::Index) {
+        idx.tokenizers().register(
+            "ngram3",
+            TextAnalyzer::builder(
+                tantivy::tokenizer::NgramTokenizer::new(1, 3, false)
+                    .expect("this tokenizer will not error with these arguments"),
+            )
+            .filter(tantivy::tokenizer::LowerCaser)
+            .build(),
+        );
+    }
+
     fn schema() -> (Schema, Self) {
         let mut schema = Schema::builder();
 
@@ -385,6 +402,82 @@ impl<H: Display, T: Display> Display for Hyperlink<H, T> {
     }
 }
 
+fn render_search(
+    search: &str,
+    reader: &IndexReader,
+    qp: &QueryParser,
+    map: &HardSchema,
+    hostname: &str,
+    output: &mut ListView,
+) {
+    output.clear();
+
+    if search.is_empty() {
+        return;
+    }
+
+    let q = qp.parse_query_lenient(&search).0;
+
+    let search = reader.searcher();
+    let top_resp = search.search(&q, &TopDocs::with_limit(20)).unwrap();
+
+    for (_, address) in top_resp {
+        let retr = AudioFile::tantivy_recall(&map, &search.doc(address).unwrap());
+
+        let s = markup::ansi::parse(format!(
+            "{}",
+            Hyperlink::new(format_args!("file://{hostname}{}", retr.file_path), &retr)
+        ));
+
+        //let s = format!("{}", retr);
+
+        output.add_child("", TextView::new(s));
+    }
+}
+
+fn uibox(index: &IndexReader, qp: &QueryParser, map: &HardSchema, hostname: &str) {
+    let mut root = cursive::termion();
+
+    root.add_global_callback('q', |c| c.quit());
+
+    root.add_layer(Panel::new(
+        LinearLayout::vertical()
+            .child(TextArea::new())
+            .child(ListView::new()),
+    ));
+
+    let mut content = String::new();
+
+    let mut runner = root.runner();
+
+    runner.refresh();
+
+    while runner.is_running() {
+        runner.step();
+
+        let v = runner
+            .screen_mut()
+            .get_mut(LayerPosition::FromBack(0))
+            .unwrap();
+
+        let layout = v
+            .downcast_mut::<Panel<LinearLayout>>()
+            .unwrap()
+            .get_inner_mut();
+
+        let input: &mut TextArea = layout.get_child_mut(0).unwrap().downcast_mut().unwrap();
+
+        if input.get_content() != content {
+            content = input.get_content().to_owned();
+
+            let output: &mut ListView = layout.get_child_mut(1).unwrap().downcast_mut().unwrap();
+
+            render_search(&content, index, qp, map, hostname, output);
+            runner.refresh();
+        }
+    }
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -392,22 +485,15 @@ fn main() {
         println!("warning: no directories passed");
     }
 
+    let hostname_own = gethostname::gethostname();
+    let hostname = hostname_own.to_str().unwrap_or("");
+
     let (scm, map) = HardSchema::schema();
 
     let index = tantivy::Index::create_in_ram(scm.clone());
 
-    let hostname_own = gethostname::gethostname();
-    let hostname = hostname_own.to_str().unwrap_or("");
+    HardSchema::register_tokenizer(&index);
 
-    index.tokenizers().register(
-        "ngram3",
-        TextAnalyzer::builder(
-            tantivy::tokenizer::NgramTokenizer::new(3, 3, false)
-                .expect("this tokenizer will not error with these arguments"),
-        )
-        .filter(tantivy::tokenizer::LowerCaser)
-        .build(),
-    );
     let mut writer = index
         .writer(20_000_000)
         .expect("this writer will not error with 20mb of storage allocated");
@@ -434,7 +520,10 @@ fn main() {
     // unwrap possibly safe because this is ram backed, docs are unclear
     let reader = index.reader().unwrap();
 
-    let qp = QueryParser::for_index(&index, map.all());
+    let mut qp = QueryParser::for_index(&index, map.all());
+    qp.set_conjunction_by_default();
+
+    uibox(&reader, &qp, &map, hostname);
 
     loop {
         let line = match editor.readline("> ") {

@@ -13,6 +13,7 @@ lto = "thin"
 [dependencies]
 camino = "1.1.7"
 clap = { version = "4.5.4", features = ["derive"] }
+cursive = { version = "0.21.1", features = ["ansi", "termion-backend"] }
 ffmpeg-next = { version = "7.0.2", features = ["postprocessing"] }
 gethostname = "0.4.3"
 libc = "0.2.155"
