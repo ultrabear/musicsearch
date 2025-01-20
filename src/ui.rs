@@ -141,7 +141,6 @@ impl UISpawner for RustylineUI {
         editor.set_auto_add_history(true);
         editor.set_completion_type(rustyline::CompletionType::List);
 
-
         while let Ok(line) = editor.readline("> ") {
             let q = qp.parse_query_lenient(&line).0;
 

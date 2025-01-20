@@ -3,9 +3,7 @@ use std::{collections::HashMap, fmt::Display, io};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
-use rayon::iter::{
-    IntoParallelRefIterator, ParallelBridge, ParallelIterator,
-};
+use rayon::iter::{IntoParallelRefIterator, ParallelBridge, ParallelIterator};
 use tantivy::{
     query::QueryParser,
     schema::{
