@@ -1,26 +1,22 @@
 use core::fmt;
-use std::{collections::HashMap, fmt::Display, io, process, time::Instant};
+use std::{collections::HashMap, fmt::Display, io};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
-use cursive::{
-    utils::markup,
-    view::{Nameable, Resizable},
-    views::{LayerPosition, LinearLayout, ListView, Panel, TextArea, TextView},
-};
 use rayon::iter::{ParallelBridge, ParallelIterator};
-use rustyline::{config::Configurer, DefaultEditor};
 use tantivy::{
-    collector::TopDocs,
     query::QueryParser,
     schema::{
-        Field, FieldValue, IndexRecordOption, OwnedValue, Schema, TextFieldIndexing, Value,
-        INDEXED, STORED, TEXT,
+        Field, FieldValue, IndexRecordOption, OwnedValue, Schema, TextFieldIndexing, INDEXED,
+        STORED, TEXT,
     },
     tokenizer::TextAnalyzer,
-    Document, IndexReader, IndexWriter, Opstamp, TantivyDocument,
+    TantivyDocument,
 };
+use ui::{CursiveUI, RustylineUI, UIReq, UISpawner};
 use walkdir::WalkDir;
+
+mod ui;
 
 const AUDIO_EXT: phf::Set<&'static str> = phf::phf_set! {
     // trash
@@ -373,109 +369,31 @@ fn recursive_find_audiofiles(
         })
 }
 
+#[derive(clap::ValueEnum, Copy, Clone)]
+enum UIOption {
+    Cli,
+    Tui,
+}
+
+impl UIOption {
+    fn get_ui(self) -> &'static dyn UISpawner {
+        match self {
+            UIOption::Cli => &RustylineUI,
+            UIOption::Tui => &CursiveUI,
+        }
+    }
+}
+
 #[derive(clap::Parser)]
 /// A music search engine utilizing ffmpeg and tantivy to gather and query songs
 struct Args {
     /// dirs to recurse into to find music
     #[arg(num_args = 1..)]
     dir: Vec<Utf8PathBuf>,
-}
 
-struct Hyperlink<H: Display, T: Display> {
-    hyperlink: H,
-    text: T,
-}
-
-impl<H: Display, T: Display> Hyperlink<H, T> {
-    fn new(hyperlink: H, text: T) -> Self {
-        Self { hyperlink, text }
-    }
-}
-
-impl<H: Display, T: Display> Display for Hyperlink<H, T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\",
-            self.hyperlink, self.text
-        )
-    }
-}
-
-fn render_search(
-    search: &str,
-    reader: &IndexReader,
-    qp: &QueryParser,
-    map: &HardSchema,
-    hostname: &str,
-    output: &mut ListView,
-) {
-    output.clear();
-
-    if search.is_empty() {
-        return;
-    }
-
-    let q = qp.parse_query_lenient(&search).0;
-
-    let search = reader.searcher();
-    let top_resp = search.search(&q, &TopDocs::with_limit(20)).unwrap();
-
-    for (_, address) in top_resp {
-        let retr = AudioFile::tantivy_recall(&map, &search.doc(address).unwrap());
-
-        let s = markup::ansi::parse(format!(
-            "{}",
-            Hyperlink::new(format_args!("file://{hostname}{}", retr.file_path), &retr)
-        ));
-
-        //let s = format!("{}", retr);
-
-        output.add_child("", TextView::new(s));
-    }
-}
-
-fn uibox(index: &IndexReader, qp: &QueryParser, map: &HardSchema, hostname: &str) {
-    let mut root = cursive::termion();
-
-    root.add_global_callback('q', |c| c.quit());
-
-    root.add_layer(Panel::new(
-        LinearLayout::vertical()
-            .child(TextArea::new())
-            .child(ListView::new()),
-    ));
-
-    let mut content = String::new();
-
-    let mut runner = root.runner();
-
-    runner.refresh();
-
-    while runner.is_running() {
-        runner.step();
-
-        let v = runner
-            .screen_mut()
-            .get_mut(LayerPosition::FromBack(0))
-            .unwrap();
-
-        let layout = v
-            .downcast_mut::<Panel<LinearLayout>>()
-            .unwrap()
-            .get_inner_mut();
-
-        let input: &mut TextArea = layout.get_child_mut(0).unwrap().downcast_mut().unwrap();
-
-        if input.get_content() != content {
-            content = input.get_content().to_owned();
-
-            let output: &mut ListView = layout.get_child_mut(1).unwrap().downcast_mut().unwrap();
-
-            render_search(&content, index, qp, map, hostname, output);
-            runner.refresh();
-        }
-    }
+    /// UI to spawn
+    #[arg(long, default_value = "cli")]
+    ui: UIOption,
 }
 
 fn main() {
@@ -513,42 +431,17 @@ fn main() {
 
     drop(writer);
 
-    let mut editor = DefaultEditor::new().unwrap();
-    editor.set_auto_add_history(true);
-    editor.set_completion_type(rustyline::CompletionType::List);
-
-    // unwrap possibly safe because this is ram backed, docs are unclear
     let reader = index.reader().unwrap();
 
     let mut qp = QueryParser::for_index(&index, map.all());
     qp.set_conjunction_by_default();
 
-    uibox(&reader, &qp, &map, hostname);
+    let ui_req = UIReq {
+        index: &reader,
+        qp: &qp,
+        map: &map,
+        hostname,
+    };
 
-    loop {
-        let line = match editor.readline("> ") {
-            Ok(line) => line,
-            Err(_) => break,
-        };
-
-        let q = qp.parse_query_lenient(&line).0;
-
-        let start = Instant::now();
-
-        let search = reader.searcher();
-        let top_resp = search.search(&q, &TopDocs::with_limit(15)).unwrap();
-
-        for (_, address) in top_resp.into_iter().rev() {
-            let retr = AudioFile::tantivy_recall(&map, &search.doc(address).unwrap());
-
-            println!(
-                "{}",
-                Hyperlink::new(format_args!("file://{hostname}{}", retr.file_path), &retr)
-            );
-        }
-
-        if !line.is_empty() {
-            println!("searched in {:?}", start.elapsed());
-        }
-    }
+    args.ui.get_ui().spawn_ui(ui_req);
 }
