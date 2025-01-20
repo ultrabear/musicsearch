@@ -3,7 +3,9 @@ use std::{collections::HashMap, fmt::Display, io};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
-use rayon::iter::{ParallelBridge, ParallelIterator};
+use rayon::iter::{
+    IntoParallelRefIterator, ParallelBridge, ParallelIterator,
+};
 use tantivy::{
     query::QueryParser,
     schema::{
@@ -75,11 +77,10 @@ struct AudioFile {
 
 impl AudioFile {
     fn new(path: Utf8PathBuf) -> Self {
-        let mut this = Self::default();
-
-        this.file_path = path;
-
-        this
+        Self {
+            file_path: path,
+            ..Self::default()
+        }
     }
 
     fn place(&mut self, key: impl Into<String> + AsRef<str>, value: impl Into<String>) {
@@ -416,14 +417,13 @@ fn main() {
         .writer(20_000_000)
         .expect("this writer will not error with 20mb of storage allocated");
 
-    let mut songs = 0;
-
-    for dir in &args.dir {
-        songs += recursive_find_audiofiles(dir)
-            .map(|v| v.map(|f| writer.add_document(f.tantivy_store(&map))))
-            .filter(|v| v.as_ref().is_ok_and(|v| v.is_ok()))
-            .count();
-    }
+    let songs = args
+        .dir
+        .par_iter()
+        .flat_map(|p| recursive_find_audiofiles(p))
+        .map(|v| v.map(|f| writer.add_document(f.tantivy_store(&map))))
+        .filter(|v| v.as_ref().is_ok_and(|v| v.is_ok()))
+        .count();
 
     writer.commit().unwrap();
 
@@ -431,6 +431,7 @@ fn main() {
 
     drop(writer);
 
+    // unwrap possibly safe because this is ram backed, docs are unclear
     let reader = index.reader().unwrap();
 
     let mut qp = QueryParser::for_index(&index, map.all());

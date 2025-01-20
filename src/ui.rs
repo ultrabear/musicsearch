@@ -45,13 +45,13 @@ fn render_search(
         return;
     }
 
-    let q = qp.parse_query_lenient(&search).0;
+    let q = qp.parse_query_lenient(search).0;
 
     let search = reader.searcher();
     let top_resp = search.search(&q, &TopDocs::with_limit(20)).unwrap();
 
     for (_, address) in top_resp {
-        let retr = AudioFile::tantivy_recall(&map, &search.doc(address).unwrap());
+        let retr = AudioFile::tantivy_recall(map, &search.doc(address).unwrap());
 
         let s = markup::ansi::parse(format!("{retr}"));
 
@@ -141,14 +141,8 @@ impl UISpawner for RustylineUI {
         editor.set_auto_add_history(true);
         editor.set_completion_type(rustyline::CompletionType::List);
 
-        // unwrap possibly safe because this is ram backed, docs are unclear
 
-        loop {
-            let line = match editor.readline("> ") {
-                Ok(line) => line,
-                Err(_) => break,
-            };
-
+        while let Ok(line) = editor.readline("> ") {
             let q = qp.parse_query_lenient(&line).0;
 
             let start = Instant::now();
@@ -157,7 +151,7 @@ impl UISpawner for RustylineUI {
             let top_resp = search.search(&q, &TopDocs::with_limit(15)).unwrap();
 
             for (_, address) in top_resp.into_iter().rev() {
-                let retr = AudioFile::tantivy_recall(&map, &search.doc(address).unwrap());
+                let retr = AudioFile::tantivy_recall(map, &search.doc(address).unwrap());
 
                 println!(
                     "{}",
