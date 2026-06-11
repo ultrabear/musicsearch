@@ -48,7 +48,9 @@ fn render_search(
     let q = qp.parse_query_lenient(search).0;
 
     let search = reader.searcher();
-    let top_resp = search.search(&q, &TopDocs::with_limit(100)).unwrap();
+    let top_resp = search
+        .search(&q, &TopDocs::with_limit(100).order_by_score())
+        .unwrap();
 
     for (_, address) in top_resp {
         let retr = AudioFile::tantivy_recall(map, &search.doc(address).unwrap());
@@ -147,7 +149,9 @@ impl UISpawner for RustylineUI {
             let start = Instant::now();
 
             let search = reader.searcher();
-            let top_resp = search.search(&q, &TopDocs::with_limit(20)).unwrap();
+            let top_resp = search
+                .search(&q, &TopDocs::with_limit(20).order_by_score())
+                .unwrap();
 
             for (_, address) in top_resp.into_iter().rev() {
                 let retr = AudioFile::tantivy_recall(map, &search.doc(address).unwrap());

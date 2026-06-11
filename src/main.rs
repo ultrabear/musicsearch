@@ -7,8 +7,8 @@ use rayon::iter::{IntoParallelRefIterator, ParallelBridge, ParallelIterator};
 use tantivy::{
     query::QueryParser,
     schema::{
-        Field, FieldValue, IndexRecordOption, OwnedValue, Schema, TextFieldIndexing, INDEXED,
-        STORED, TEXT,
+        document::{CompactDocValue, ReferenceValueLeaf},
+        Field, IndexRecordOption, Schema, TextFieldIndexing, Value, INDEXED, STORED, TEXT,
     },
     tokenizer::TextAnalyzer,
     TantivyDocument,
@@ -157,19 +157,18 @@ impl AudioFile {
         doc
     }
 
-    fn store_fieldvalue(&mut self, scm: &HardSchema, fv: &FieldValue) {
-        let f = &fv.field;
-
-        fn must_string(v: &OwnedValue) -> String {
-            let OwnedValue::Str(s) = v else {
+    fn store_fieldvalue(&mut self, scm: &HardSchema, f: Field, fv: CompactDocValue) {
+        let value = fv.as_value().into_leaf().expect("we only insert text/u64");
+        fn must_string(v: ReferenceValueLeaf) -> String {
+            let ReferenceValueLeaf::Str(s) = v else {
                 unreachable!("this field must be a string")
             };
 
-            s.to_owned()
+            (*s).to_owned()
         }
 
-        fn must_u64(v: &OwnedValue) -> u64 {
-            let &OwnedValue::U64(v) = v else {
+        fn must_u64(v: ReferenceValueLeaf) -> u64 {
+            let ReferenceValueLeaf::U64(v) = v else {
                 unreachable!("this field must be a u64")
             };
 
@@ -177,7 +176,7 @@ impl AudioFile {
         }
 
         #[deny(unused_variables)]
-        let HardSchema {
+        let &HardSchema {
             path,
             artist,
             album,
@@ -191,12 +190,12 @@ impl AudioFile {
         _ = (extras, item_type);
 
         match f {
-            _ if f == path => self.file_path = must_string(&fv.value).into(),
-            _ if f == artist => self.artist = Some(must_string(&fv.value)),
-            _ if f == album => self.album = Some(must_string(&fv.value)),
-            _ if f == title => self.title = Some(must_string(&fv.value)),
-            _ if f == track => self.track = Some(must_u64(&fv.value)),
-            _ if f == date => self.date = Some(must_string(&fv.value)),
+            _ if f == path => self.file_path = must_string(value).into(),
+            _ if f == artist => self.artist = Some(must_string(value)),
+            _ if f == album => self.album = Some(must_string(value)),
+            _ if f == title => self.title = Some(must_string(value)),
+            _ if f == track => self.track = Some(must_u64(value)),
+            _ if f == date => self.date = Some(must_string(value)),
 
             _ => (),
         }
@@ -205,8 +204,8 @@ impl AudioFile {
     fn tantivy_recall(scm: &HardSchema, doc: &TantivyDocument) -> Self {
         let mut s = Self::new(Utf8PathBuf::new());
 
-        for itm in doc.field_values() {
-            s.store_fieldvalue(scm, itm);
+        for (f, value) in doc.field_values() {
+            s.store_fieldvalue(scm, f, value);
         }
 
         s
