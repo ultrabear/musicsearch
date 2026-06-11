@@ -218,26 +218,26 @@ impl Display for AudioFile {
         // file name must exist to be a valid AudioFile
         let fname = self.file_path.file_name().unwrap();
 
-        write!(f, "\x1b[37m{fname}")?;
+        write!(f, "\x1b[0;2m{fname}")?;
 
         if let Some(title) = &self.title {
-            write!(f, ": \x1b[92m{title}")?;
+            write!(f, ": \x1b[0;92m{title}")?;
         }
 
         if let Some(artist) = self.artist.as_ref().or(self.album_artist.as_ref()) {
-            write!(f, " - \x1b[92m{artist}")?;
+            write!(f, " - \x1b[0;92m{artist}")?;
         }
 
         if let Some(album) = &self.album {
-            write!(f, " \x1b[37m- \x1b[94m{album}")?;
+            write!(f, " \x1b[0;2m- \x1b[94m{album}")?;
         }
 
         if let Some(track) = self.track {
-            write!(f, "\x1b[94m #{track}")?;
+            write!(f, "\x1b[0;94m #{track}")?;
         }
 
         if let Some(date) = &self.date {
-            write!(f, "\x1b[32m ({date})")?;
+            write!(f, "\x1b[0;32m ({date})")?;
         }
 
         write!(f, "\x1b[0m")?;
@@ -359,12 +359,16 @@ fn recursive_find_audiofiles(
 
             let ffmpeg_meta = ffmpeg_next::format::input(&path)?;
 
+            let meta = ffmpeg_meta.metadata();
+
+            let streams = ffmpeg_meta.streams().collect::<Vec<_>>();
+            let streams = streams.iter().map(|s| s.metadata()).collect::<Vec<_>>();
+
+            let metadata_joined = streams.iter().flat_map(|s| s.iter()).chain(meta.iter());
+
             // metadata() is coming from a private Deref<Target = Context> type...
             // TODO PR it to not be like this
-            Ok(AudioFile::from_kv_and_path(
-                path,
-                ffmpeg_meta.metadata().iter(),
-            ))
+            Ok(AudioFile::from_kv_and_path(path, metadata_joined))
         })
 }
 
